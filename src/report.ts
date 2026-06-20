@@ -11,6 +11,8 @@ export function summarize(results: IntentResult[]): { passed: number; total: num
 export function toMarkdown(report: EvalReport): string {
   const { score } = report;
   const pct = score.total ? Math.round((score.passed / score.total) * 100) : 0;
+  const flakyCount = report.results.filter((r) => r.flaky).length;
+  const minPct = Math.round((report.minConfidence ?? 0.8) * 100);
   const lines: string[] = [];
 
   lines.push(`# routeproof report`, "");
@@ -18,28 +20,44 @@ export function toMarkdown(report: EvalReport): string {
     `**Server:** \`${report.server}\`  ·  **Model:** ${report.model}  ·  **Samples/intent:** ${report.samplesPerIntent}`,
     "",
   );
-  lines.push(`**Routing score: ${score.passed}/${score.total} (${pct}%)**`, "");
+  let headline = `**Routing score: ${score.passed}/${score.total} (${pct}%)**`;
+  if (flakyCount) headline += `  ·  ⚠️ ${flakyCount} flaky (passed below ${minPct}% confidence)`;
+  lines.push(headline, "");
 
   lines.push(`| intent | query | expected | picked | conf | |`);
   lines.push(`|---|---|---|---|---|---|`);
   for (const r of report.results) {
     const conf = `${Math.round(r.confidence * 100)}%`;
-    const mark = r.pass ? "✅" : "❌";
+    const mark = r.pass ? (r.flaky ? "⚠️" : "✅") : "❌";
     lines.push(
       `| ${r.intent.id} | ${esc(r.intent.query)} | \`${r.intent.expect}\` | \`${r.pick ?? "none"}\` | ${conf} | ${mark} |`,
     );
   }
 
-  const misses = report.results.filter((r) => !r.pass);
-  if (misses.length) {
-    lines.push("", `## Misroutes (${misses.length})`);
-    for (const r of misses) {
-      lines.push("", `### ❌ ${r.intent.id} — "${esc(r.intent.query)}"`);
-      lines.push(
-        `- expected \`${r.intent.expect}\`, got \`${r.pick ?? "none"}\` (${Math.round(r.confidence * 100)}% of ${r.samples.length} samples)`,
-      );
-      const reason = r.samples.find((s) => (s.picked ?? "none") === (r.pick ?? "none"))?.reason;
-      if (reason) lines.push(`- model's reasoning: ${esc(reason)}`);
+  // Both hard misroutes and flaky passes are issues worth a fix.
+  const issues = report.results.filter((r) => !r.pass || r.flaky);
+  if (issues.length) {
+    lines.push("", `## Issues (${issues.length})`);
+    for (const r of issues) {
+      const confPct = Math.round(r.confidence * 100);
+      if (r.pass) {
+        lines.push("", `### ⚠️ ${r.intent.id} (flaky) — "${esc(r.intent.query)}"`);
+        lines.push(
+          `- routes to \`${r.pick ?? "none"}\` only ${confPct}% of the time (${r.samples.length} samples); the rest go elsewhere. Expected \`${r.intent.expect}\`.`,
+        );
+      } else {
+        lines.push("", `### ❌ ${r.intent.id} (misroute) — "${esc(r.intent.query)}"`);
+        lines.push(
+          `- expected \`${r.intent.expect}\`, got \`${r.pick ?? "none"}\` (${confPct}% of ${r.samples.length} samples)`,
+        );
+      }
+      if (r.diagnosis) {
+        lines.push(`- **why:** ${esc(r.diagnosis.why)}`);
+        if (r.diagnosis.suggestedFix) lines.push(`- **fix:** ${esc(r.diagnosis.suggestedFix)}`);
+      } else {
+        const reason = r.samples.find((s) => (s.picked ?? "none") === (r.pick ?? "none"))?.reason;
+        if (reason) lines.push(`- model's reasoning: ${esc(reason)}`);
+      }
     }
   }
 

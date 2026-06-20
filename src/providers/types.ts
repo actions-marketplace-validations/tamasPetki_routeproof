@@ -11,4 +11,6 @@ import type { ToolSpec, RouteSample } from "../types.ts";
 export interface Provider {
   readonly model: string;
   route(tools: ToolSpec[], query: string): Promise<RouteSample>;
+  /** Free-text completion — used by the diagnosis pass to explain a misroute. */
+  complete(prompt: string): Promise<string>;
 }

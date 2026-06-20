@@ -31,6 +31,12 @@ export interface RouteSample {
   reason: string;
 }
 
+/** Why a misroute happened, and the concrete edit that would fix it. */
+export interface Diagnosis {
+  why: string;
+  suggestedFix: string;
+}
+
 /** Aggregated result for one intent across N samples. */
 export interface IntentResult {
   intent: Intent;
@@ -41,12 +47,18 @@ export interface IntentResult {
   confidence: number;
   /** True if the majority pick matches intent.expect. */
   pass: boolean;
+  /** Passed, but below the confidence threshold — routing is a coin flip. */
+  flaky?: boolean;
+  /** Populated for misroutes AND flaky passes: why it went wrong + how to fix it. */
+  diagnosis?: Diagnosis;
 }
 
 export interface EvalReport {
   server: string;
   model: string;
   samplesPerIntent: number;
+  /** Confidence below which a passing intent is flagged as flaky (0..1). */
+  minConfidence?: number;
   tools: ToolSpec[];
   results: IntentResult[];
   score: { passed: number; total: number };

@@ -9,6 +9,7 @@ import { loadIntentSuite } from "./intents.ts";
 import { loadToolsFromServer } from "./mcp-client.ts";
 import { AnthropicProvider } from "./providers/anthropic.ts";
 import { evalIntent } from "./router.ts";
+import { diagnoseMisroute } from "./diagnose.ts";
 import { summarize, toMarkdown } from "./report.ts";
 import type { EvalReport, IntentResult } from "./types.ts";
 
@@ -18,16 +19,20 @@ interface Args {
   samples: number;
   model?: string;
   json: boolean;
+  diagnose: boolean;
+  minConfidence: number;
 }
 
 function parseArgs(argv: string[]): Args {
-  const a: Args = { suite: "", samples: 3, json: false };
+  const a: Args = { suite: "", samples: 3, json: false, diagnose: true, minConfidence: 0.8 };
   for (let i = 0; i < argv.length; i++) {
     const v = argv[i]!;
     if (v === "--server") a.server = argv[++i];
     else if (v === "--samples") a.samples = Number(argv[++i] ?? 3);
     else if (v === "--model") a.model = argv[++i];
+    else if (v === "--min-confidence") a.minConfidence = Number(argv[++i] ?? 0.8);
     else if (v === "--json") a.json = true;
+    else if (v === "--no-diagnose") a.diagnose = false;
     else if (v === "-h" || v === "--help") {
       printUsage();
       process.exit(0);
@@ -43,7 +48,7 @@ function parseArgs(argv: string[]): Args {
 
 function printUsage(): void {
   console.error(
-    'usage: routeproof <intents.json|.yaml> --server "<cmd>" [--samples N] [--model M] [--json]',
+    'usage: routeproof <intents.json|.yaml> --server "<cmd>" [--samples N] [--model M] [--min-confidence 0..1] [--json] [--no-diagnose]',
   );
 }
 
@@ -64,10 +69,27 @@ async function main(): Promise<void> {
     results.push(await evalIntent(provider, tools, intent, args.samples));
   }
 
+  // A pass below the confidence threshold is flaky — it routes wrong a real
+  // fraction of the time, which a single-sample test would miss entirely.
+  for (const r of results) {
+    if (r.pass && r.confidence < args.minConfidence) r.flaky = true;
+  }
+
+  // Diagnose hard misroutes AND flaky passes — both have a real description
+  // problem worth explaining. Clean, confident passes cost nothing.
+  if (args.diagnose) {
+    for (const r of results) {
+      if (!r.pass || r.flaky) {
+        r.diagnosis = await diagnoseMisroute(provider, tools, r.intent, r.pick);
+      }
+    }
+  }
+
   const report: EvalReport = {
     server,
     model: provider.model,
     samplesPerIntent: args.samples,
+    minConfidence: args.minConfidence,
     tools,
     results,
     score: summarize(results),

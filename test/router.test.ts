@@ -16,6 +16,9 @@ function fakeProvider(script: RouteSample[]): Provider {
     async route() {
       return script[i++ % script.length]!;
     },
+    async complete() {
+      return "";
+    },
   };
 }
 

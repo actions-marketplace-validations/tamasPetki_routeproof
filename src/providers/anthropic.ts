@@ -27,27 +27,13 @@ export class AnthropicProvider implements Provider {
       input_schema: (t.inputSchema as object) ?? { type: "object", properties: {} },
     }));
 
-    const res = await fetch(API, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        "x-api-key": this.#apiKey,
-        "anthropic-version": "2023-06-01",
-      },
-      body: JSON.stringify({
-        model: this.model,
-        max_tokens: 1024,
-        tools: anthropicTools,
-        messages: [{ role: "user", content: query }],
-      }),
+    const blocks = await this.#post({
+      model: this.model,
+      max_tokens: 1024,
+      tools: anthropicTools,
+      messages: [{ role: "user", content: query }],
     });
 
-    if (!res.ok) {
-      throw new Error(`Anthropic ${res.status}: ${await res.text()}`);
-    }
-
-    const data = (await res.json()) as { content?: Array<Record<string, unknown>> };
-    const blocks = data.content ?? [];
     const toolUse = blocks.find((b) => b.type === "tool_use");
     const text = blocks
       .filter((b) => b.type === "text")
@@ -59,5 +45,35 @@ export class AnthropicProvider implements Provider {
       return { picked: String(toolUse.name), reason: `called ${String(toolUse.name)}` };
     }
     return { picked: null, reason: text || "no tool called" };
+  }
+
+  async complete(prompt: string): Promise<string> {
+    const blocks = await this.#post({
+      model: this.model,
+      max_tokens: 512,
+      messages: [{ role: "user", content: prompt }],
+    });
+    return blocks
+      .filter((b) => b.type === "text")
+      .map((b) => String(b.text ?? ""))
+      .join("")
+      .trim();
+  }
+
+  async #post(body: Record<string, unknown>): Promise<Array<Record<string, unknown>>> {
+    const res = await fetch(API, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-api-key": this.#apiKey,
+        "anthropic-version": "2023-06-01",
+      },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      throw new Error(`Anthropic ${res.status}: ${await res.text()}`);
+    }
+    const data = (await res.json()) as { content?: Array<Record<string, unknown>> };
+    return data.content ?? [];
   }
 }
