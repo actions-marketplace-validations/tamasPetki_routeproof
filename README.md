@@ -68,11 +68,23 @@ There's a GitHub Action wrapper, so the whole thing is one step:
 
 A copy-paste workflow lives in [`examples/routeproof.yml`](examples/routeproof.yml).
 
+## Fuzz mode — find the blind spots you never wrote a test for
+
+A hand-written suite only tests the queries you thought of. Fuzz writes the ones you didn't: it reads your tool descriptions, asks a model to invent realistic user queries for each tool **in a user's own words**, then routes them. The ones that mis-route are gaps — plausible questions your descriptions don't actually own.
+
+```bash
+npx routeproof --fuzz --server "node dist/server.js" --fuzz-per-tool 3
+```
+
+The generator is pushed to use the vocabulary *users* reach for, not the words your description already contains — that user-words-vs-doc-words gap is the whole point (the "cash" that never said it meant "stablecoins"). When I ran it on my own 15-tool server, the read tools routed clean but a whole class of "add / remove / stop tracking" phrasings collapsed into the wrong tool — a systematic gap I'd never written an intent for.
+
+**Honest limitation:** the same model class generates and routes, so fuzz surfaces blind spots relative to that model's sense of how users talk. It's a discovery aid that proposes queries worth keeping — promote the real ones into a suite and `--save-baseline` them.
+
 ## Modes
 
 - ✅ **eval** — score a suite, diagnose misroutes with a concrete description fix.
 - ✅ **regression** — pin a baseline, fail CI when an edit drops routing.
-- ⏳ **fuzz** — generate realistic intents from your descriptions and surface the ones that mis-route — blind spots you never wrote a test for.
+- ✅ **fuzz** — generate realistic intents from your descriptions and surface the ones that mis-route.
 
 ## Install / run
 

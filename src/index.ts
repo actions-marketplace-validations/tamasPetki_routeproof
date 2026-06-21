@@ -10,6 +10,7 @@ import { loadToolsFromServer } from "./mcp-client.ts";
 import { AnthropicProvider } from "./providers/anthropic.ts";
 import { evalIntent } from "./router.ts";
 import { diagnoseMisroute } from "./diagnose.ts";
+import { generateIntentsForTool } from "./fuzz.ts";
 import { mapWithConcurrency } from "./concurrency.ts";
 import { summarize, toMarkdown } from "./report.ts";
 import {
@@ -19,7 +20,7 @@ import {
   regressionMarkdown,
 } from "./baseline.ts";
 import { readFileSync, writeFileSync } from "node:fs";
-import type { EvalReport, IntentResult } from "./types.ts";
+import type { EvalReport, Intent, IntentResult } from "./types.ts";
 
 interface Args {
   suite: string;
@@ -33,6 +34,8 @@ interface Args {
   saveBaseline?: string;
   baseline?: string;
   driftTolerance: number;
+  fuzz: boolean;
+  fuzzPerTool: number;
 }
 
 function parseArgs(argv: string[]): Args {
@@ -44,6 +47,8 @@ function parseArgs(argv: string[]): Args {
     minConfidence: 0.8,
     concurrency: 4,
     driftTolerance: 0.2,
+    fuzz: false,
+    fuzzPerTool: 3,
   };
   for (let i = 0; i < argv.length; i++) {
     const v = argv[i]!;
@@ -59,6 +64,8 @@ function parseArgs(argv: string[]): Args {
       a.baseline = argv[++i];
       if (!a.baseline) throw new Error("--baseline needs a file path");
     } else if (v === "--drift-tolerance") a.driftTolerance = Number(argv[++i] ?? 0.2);
+    else if (v === "--fuzz") a.fuzz = true;
+    else if (v === "--fuzz-per-tool") a.fuzzPerTool = Number(argv[++i] ?? 3);
     else if (v === "--json") a.json = true;
     else if (v === "--no-diagnose") a.diagnose = false;
     else if (v === "-h" || v === "--help") {
@@ -66,10 +73,17 @@ function parseArgs(argv: string[]): Args {
       process.exit(0);
     } else if (!a.suite) a.suite = v;
   }
-  if (!a.suite) {
+  // Fuzz invents its own intents from the tool descriptions, so it needs no
+  // suite file — but it does need a server to read those descriptions from.
+  if (!a.suite && !a.fuzz) {
     printUsage();
     throw new Error("missing <intents> file");
   }
+  if (a.fuzz && !a.server) throw new Error("--fuzz needs --server (there's no intent file to read it from)");
+  if (a.fuzz && (a.saveBaseline || a.baseline)) {
+    throw new Error("--fuzz can't be combined with baseline mode — generated intents differ each run, so pinning them is meaningless. Promote the keepers into a suite first.");
+  }
+  if (!Number.isFinite(a.fuzzPerTool) || a.fuzzPerTool < 1) throw new Error("--fuzz-per-tool must be >= 1");
   if (!Number.isFinite(a.samples) || a.samples < 1) throw new Error("--samples must be >= 1");
   if (!Number.isFinite(a.concurrency) || a.concurrency < 1) throw new Error("--concurrency must be >= 1");
   // A NaN/out-of-range tolerance would silently disable the soft half of the
@@ -89,14 +103,22 @@ function parseArgs(argv: string[]): Args {
 function printUsage(): void {
   console.error(
     'usage: routeproof <intents.json|.yaml> --server "<cmd>" [--samples N] [--concurrency N] [--model M] [--min-confidence 0..1] [--json] [--no-diagnose]\n' +
-      "       regression mode: [--save-baseline <file>] to pin, [--baseline <file>] to fail on drift [--drift-tolerance 0..1]",
+      "       regression mode: [--save-baseline <file>] to pin, [--baseline <file>] to fail on drift [--drift-tolerance 0..1]\n" +
+      "       fuzz mode: --fuzz [--fuzz-per-tool N] — invent realistic queries from your tool descriptions and surface the mis-routers",
   );
 }
 
 async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
-  const suite = await loadIntentSuite(args.suite);
-  const server = args.server ?? suite.server;
+
+  // Resolve the server: from --server, or (non-fuzz only) the intent file.
+  let server = args.server;
+  let suiteIntents: Intent[] = [];
+  if (!args.fuzz) {
+    const suite = await loadIntentSuite(args.suite);
+    server = server ?? suite.server;
+    suiteIntents = suite.intents;
+  }
   if (!server) {
     throw new Error("no server command — pass --server or set 'server' in the intent file");
   }
@@ -105,8 +127,23 @@ async function main(): Promise<void> {
   if (tools.length === 0) throw new Error(`server '${server}' advertised no tools`);
 
   const provider = new AnthropicProvider(args.model);
+
+  // In fuzz mode, generate the intents from the tool descriptions themselves —
+  // one generation call per tool, run together — then evaluate them normally.
+  let intents = suiteIntents;
+  if (args.fuzz) {
+    const generated = await mapWithConcurrency(tools, args.concurrency, (t) =>
+      generateIntentsForTool(provider, tools, t, args.fuzzPerTool),
+    );
+    intents = generated.flat();
+    if (intents.length === 0) throw new Error("fuzz generated no usable queries — try a different model");
+    console.error(
+      `routeproof: fuzz generated ${intents.length} queries across ${tools.length} tools (${args.fuzzPerTool}/tool) — routing them now.`,
+    );
+  }
+
   const results: IntentResult[] = await mapWithConcurrency(
-    suite.intents,
+    intents,
     args.concurrency,
     (intent) => evalIntent(provider, tools, intent, args.samples),
   );
