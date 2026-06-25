@@ -28,22 +28,8 @@ export function toMarkdown(report: EvalReport): string {
 
   // Lead with the escalations: a misroute that crossed a capability boundary is a
   // safety issue, not just a wrong answer, and the routing score alone hides it.
-  if (escalations.length) {
-    lines.push(`## 🚨 Privilege-escalating misroutes (${escalations.length})`);
-    lines.push(
-      "These queries reached a more-privileged tool than they should have — a wrong pick that also crosses a capability boundary. Fix these before any lateral misroute below.",
-    );
-    for (const r of escalations) {
-      const e = r.escalation!;
-      const detail =
-        e.from === "none"
-          ? `should route to **no tool**, but a **${e.to}**-tier tool \`${r.pick}\` answered it`
-          : `expected \`${r.intent.expect}\` (**${e.from}**), got \`${r.pick}\` (**${e.to}**)`;
-      lines.push("", `### 🚨 ${r.intent.id} — "${esc(r.intent.query)}"`);
-      lines.push(`- ${detail}`);
-    }
-    lines.push("");
-  }
+  const esc1 = escalationSection(report.results);
+  if (esc1.length) lines.push(...esc1, "");
 
   lines.push(`| intent | query | expected | picked | conf | |`);
   lines.push(`|---|---|---|---|---|---|`);
@@ -83,6 +69,31 @@ export function toMarkdown(report: EvalReport): string {
   }
 
   return lines.join("\n") + "\n";
+}
+
+/**
+ * The 🚨 privilege-escalation section, as markdown lines (empty when none).
+ * Shared by the standard report and the regression gate so an escalating
+ * misroute reads identically wherever it surfaces.
+ */
+export function escalationSection(results: IntentResult[]): string[] {
+  const escalations = results.filter((r) => r.escalation);
+  if (!escalations.length) return [];
+  const lines: string[] = [];
+  lines.push(`## 🚨 Privilege-escalating misroutes (${escalations.length})`);
+  lines.push(
+    "These queries reached a more-privileged tool than they should have — a wrong pick that also crosses a capability boundary. Fix these first.",
+  );
+  for (const r of escalations) {
+    const e = r.escalation!;
+    const detail =
+      e.from === "none"
+        ? `should route to **no tool**, but a **${e.to}**-tier tool \`${r.pick}\` answered it`
+        : `expected \`${r.intent.expect}\` (**${e.from}**), got \`${r.pick}\` (**${e.to}**)`;
+    lines.push("", `### 🚨 ${r.intent.id} — "${esc(r.intent.query)}"`);
+    lines.push(`- ${detail}`);
+  }
+  return lines;
 }
 
 function esc(s: string): string {

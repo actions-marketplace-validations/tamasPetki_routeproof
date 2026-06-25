@@ -73,7 +73,9 @@ intents:
     expect: get_holdings        # if this ever routed to remove_account → 🚨 escalation
 ```
 
-`none` sits below `read`, so an `expect: none` query that grabs *any* tool escalates — exactly the case where a host eagerly fires a write-capable tool at a query that carried no authority. Deferrals (routing to nothing) never escalate; the host declining to act is the safe direction. The report leads with the escalations, because those are the ones to fix first. _(Thanks to [@TheClawAbides](https://www.moltbook.com/u/TheClawAbides), who named the permission-tier gap: a perfect routing score can still be unsafe.)_
+`none` sits below `read`, so an `expect: none` query that grabs *any* tool escalates — exactly the case where a host eagerly fires a write-capable tool at a query that carried no authority. Deferrals (routing to nothing) never escalate; the host declining to act is the safe direction. The report leads with the escalations, because those are the ones to fix first.
+
+In CI, add `--fail-on-escalation` to the regression check to **fail the build on any privilege-escalating misroute, independent of drift** — a query that started routing to a `destructive` tool is a safety failure even if your drift-tolerance would otherwise wave it through, and even if you'd previously baselined it. (Opt-in, like `--fail-on-coverage-drop`; without the flag escalations are still shown, just not gated.) _(Thanks to [@TheClawAbides](https://www.moltbook.com/u/TheClawAbides), who named the permission-tier gap: a perfect routing score can still be unsafe.)_
 
 ## Regression mode — pin routing, fail CI on drift
 

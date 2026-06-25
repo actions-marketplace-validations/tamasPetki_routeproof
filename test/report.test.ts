@@ -1,6 +1,34 @@
 import { describe, expect, test } from "bun:test";
-import { summarize, toMarkdown } from "../src/report.ts";
+import { summarize, toMarkdown, escalationSection } from "../src/report.ts";
 import type { EvalReport, IntentResult } from "../src/types.ts";
+
+describe("escalationSection", () => {
+  test("is empty when nothing escalated", () => {
+    expect(escalationSection([])).toEqual([]);
+    expect(
+      escalationSection([
+        { intent: { id: "x", query: "x", expect: "a" }, samples: [], pick: "b", confidence: 1, pass: false },
+      ]),
+    ).toEqual([]);
+  });
+
+  test("renders a heading + one line per escalation", () => {
+    const lines = escalationSection([
+      {
+        intent: { id: "danger", query: "show balances", expect: "get_holdings" },
+        samples: [],
+        pick: "remove_account",
+        confidence: 1,
+        pass: false,
+        escalation: { from: "read", to: "destructive" },
+      },
+    ]);
+    const md = lines.join("\n");
+    expect(md).toContain("## 🚨 Privilege-escalating misroutes (1)");
+    expect(md).toContain("### 🚨 danger");
+    expect(md).toContain("expected `get_holdings` (**read**), got `remove_account` (**destructive**)");
+  });
+});
 
 const results: IntentResult[] = [
   {

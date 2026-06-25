@@ -36,6 +36,7 @@ interface Args {
   baseline?: string;
   driftTolerance: number;
   failOnCoverageDrop: boolean;
+  failOnEscalation: boolean;
   fuzz: boolean;
   fuzzPerTool: number;
 }
@@ -50,6 +51,7 @@ function parseArgs(argv: string[]): Args {
     concurrency: 4,
     driftTolerance: 0.2,
     failOnCoverageDrop: false,
+    failOnEscalation: false,
     fuzz: false,
     fuzzPerTool: 3,
   };
@@ -68,6 +70,7 @@ function parseArgs(argv: string[]): Args {
       if (!a.baseline) throw new Error("--baseline needs a file path");
     } else if (v === "--drift-tolerance") a.driftTolerance = Number(argv[++i] ?? 0.2);
     else if (v === "--fail-on-coverage-drop") a.failOnCoverageDrop = true;
+    else if (v === "--fail-on-escalation") a.failOnEscalation = true;
     else if (v === "--fuzz") a.fuzz = true;
     else if (v === "--fuzz-per-tool") a.fuzzPerTool = Number(argv[++i] ?? 3);
     else if (v === "--json") a.json = true;
@@ -107,7 +110,7 @@ function parseArgs(argv: string[]): Args {
 function printUsage(): void {
   console.error(
     'usage: routeproof <intents.json|.yaml> --server "<cmd>" [--samples N] [--concurrency N] [--model M] [--min-confidence 0..1] [--json] [--no-diagnose]\n' +
-      "       regression mode: [--save-baseline <file>] to pin, [--baseline <file>] to fail on drift [--drift-tolerance 0..1] [--fail-on-coverage-drop]\n" +
+      "       regression mode: [--save-baseline <file>] to pin, [--baseline <file>] to fail on drift [--drift-tolerance 0..1] [--fail-on-coverage-drop] [--fail-on-escalation]\n" +
       "       fuzz mode: --fuzz [--fuzz-per-tool N] — invent realistic queries from your tool descriptions and surface the mis-routers",
   );
 }
@@ -215,7 +218,7 @@ async function main(): Promise<void> {
     // Across models, routing differs for reasons unrelated to your edits — the
     // comparison is meaningless, so refuse to gate on it rather than flip CI on noise.
     if (cmp.modelMismatch) {
-      console.log(args.json ? JSON.stringify({ report, comparison: cmp }, null, 2) : regressionMarkdown(cmp, { failOnCoverageDrop: args.failOnCoverageDrop }));
+      console.log(args.json ? JSON.stringify({ report, comparison: cmp }, null, 2) : regressionMarkdown(cmp, { failOnCoverageDrop: args.failOnCoverageDrop, failOnEscalation: args.failOnEscalation, results }));
       console.error(
         `routeproof: baseline was pinned on ${cmp.modelMismatch.baseline} but this run used ${cmp.modelMismatch.current}. Re-pin on the model you gate with (--save-baseline) — refusing to gate on a cross-model comparison.`,
       );
@@ -230,12 +233,17 @@ async function main(): Promise<void> {
       );
     }
 
-    console.log(args.json ? JSON.stringify({ report, comparison: cmp }, null, 2) : regressionMarkdown(cmp, { failOnCoverageDrop: args.failOnCoverageDrop }));
+    console.log(args.json ? JSON.stringify({ report, comparison: cmp }, null, 2) : regressionMarkdown(cmp, { failOnCoverageDrop: args.failOnCoverageDrop, failOnEscalation: args.failOnEscalation, results }));
     // Routing regressions always gate. A coverage drop (intents dropped from the
     // suite the baseline pinned) gates only when the caller opts in — removing a
     // tool legitimately drops its intents, but an accidental shrink is the
-    // failure that otherwise passes every test.
-    const fail = cmp.hasRegression || (args.failOnCoverageDrop && cmp.hasCoverageDrop);
+    // failure that otherwise passes every test. A privilege escalation in this
+    // run gates on opt-in too, independent of drift: a query that routes to a
+    // write/destructive tool is a safety failure even if it's not a *new* one.
+    const fail =
+      cmp.hasRegression ||
+      (args.failOnCoverageDrop && cmp.hasCoverageDrop) ||
+      (args.failOnEscalation && results.some((r) => r.escalation));
     process.exit(fail ? 1 : 0);
   }
 

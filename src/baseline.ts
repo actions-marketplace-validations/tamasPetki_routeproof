@@ -10,7 +10,8 @@
 // A pre-existing failure you knowingly baselined is NOT drift — the gate fires
 // only when reality gets worse than the line you pinned.
 
-import type { EvalReport } from "./types.ts";
+import type { EvalReport, IntentResult } from "./types.ts";
+import { escalationSection } from "./report.ts";
 
 /** One intent's pinned routing outcome. */
 export interface BaselineEntry {
@@ -207,7 +208,7 @@ function pct(x: number): string {
 /** Render the regression comparison as CI-friendly markdown. */
 export function regressionMarkdown(
   cmp: RegressionReport,
-  opts: { failOnCoverageDrop?: boolean } = {},
+  opts: { failOnCoverageDrop?: boolean; failOnEscalation?: boolean; results?: IntentResult[] } = {},
 ): string {
   const lines: string[] = [];
   lines.push(`# routeproof — regression check`, "");
@@ -221,16 +222,34 @@ export function regressionMarkdown(
 
   // Coverage drop gates only when the caller opted in; otherwise it's a warning.
   const coverageGated = !!opts.failOnCoverageDrop && cmp.hasCoverageDrop;
+  // A privilege escalation in the CURRENT run is a property of this run, not the
+  // baseline diff — so it gates independent of drift, when opted in. Always shown.
+  const escalations = (opts.results ?? []).filter((r) => r.escalation);
+  const escalationGated = !!opts.failOnEscalation && escalations.length > 0;
 
-  if (!cmp.hasRegression && !coverageGated) {
+  if (!cmp.hasRegression && !coverageGated && !escalationGated) {
     lines.push(`**✅ No routing regressions vs baseline.**`);
   } else {
     const parts: string[] = [];
     if (cmp.regressions.length) parts.push(`${cmp.regressions.length} routing regression(s)`);
+    if (escalationGated) parts.push(`${escalations.length} privilege-escalating misroute(s)`);
     if (coverageGated) parts.push(`${cmp.removed.length} intent(s) dropped from coverage`);
     lines.push(`**❌ ${parts.join(" + ")} vs baseline.**`);
   }
   lines.push("");
+
+  // Lead with escalations — the highest-severity finding, shown whether or not
+  // it gates (a privilege-crossing route is worth seeing even if not opted into).
+  const escLines = escalationSection(opts.results ?? []);
+  if (escLines.length) {
+    if (!escalationGated) {
+      lines.push(
+        `> ⚠️ A privilege-escalating misroute is present below. Pass \`--fail-on-escalation\` to gate CI on it (independent of drift).`,
+        "",
+      );
+    }
+    lines.push(...escLines, "");
+  }
 
   if (cmp.regressions.length) {
     lines.push(`## Regressions (${cmp.regressions.length})`, "");
