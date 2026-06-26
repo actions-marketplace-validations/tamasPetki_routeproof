@@ -96,7 +96,7 @@ npx routeproof intents.yaml --server "node dist/server.js" --baseline routeproof
 There's a GitHub Action wrapper, so the whole thing is one step:
 
 ```yaml
-- uses: tamasPetki/routeproof@v0.3.0
+- uses: tamasPetki/routeproof@v0.3.2
   with:
     intents: routeproof.intents.yaml
     server: "node dist/server.js"
