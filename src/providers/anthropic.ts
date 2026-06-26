@@ -31,11 +31,18 @@ export class AnthropicProvider implements Provider {
     // modelling a host deciding *whether* to fire a tool. select mode: tool_choice
     // any forces a pick, modelling a forced classifier (an orchestrator's router)
     // that must choose one of N — so `picked` is never null in this mode.
+    //
+    // `disable_parallel_tool_use` in BOTH modes: one pick per query is routeproof's
+    // unit of measurement. `any` forces >=1 tool, not exactly 1, and auto can also
+    // fan out — without this a multi-pick response would be scored on an arbitrary
+    // first block. It can't perturb a single-pick response, so baselines are stable.
     const blocks = await this.#post({
       model: this.model,
       max_tokens: 1024,
       tools: anthropicTools,
-      tool_choice: opts.forcePick ? { type: "any" } : { type: "auto" },
+      tool_choice: opts.forcePick
+        ? { type: "any", disable_parallel_tool_use: true }
+        : { type: "auto", disable_parallel_tool_use: true },
       messages: [{ role: "user", content: query }],
     });
 
