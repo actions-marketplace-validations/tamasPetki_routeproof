@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { summarize, toMarkdown, escalationSection } from "../src/report.ts";
-import type { EvalReport, IntentResult } from "../src/types.ts";
+import { summarize, toMarkdown, escalationSection, dryRunMarkdown } from "../src/report.ts";
+import type { EvalReport, IntentResult, ToolSpec } from "../src/types.ts";
 
 describe("escalationSection", () => {
   test("is empty when nothing escalated", () => {
@@ -205,5 +205,103 @@ describe("toMarkdown", () => {
       score: { passed: 1, total: 1 },
     });
     expect(piped).toContain("a \\| b");
+  });
+});
+
+describe("dryRunMarkdown", () => {
+  const tools: ToolSpec[] = [
+    {
+      name: "get_holdings",
+      description: "how much of each asset do I have",
+      inputSchema: { type: "object", properties: { account_id: {} } },
+    },
+    { name: "remove_account", description: "stop tracking | delete an account", inputSchema: {} },
+  ];
+
+  test("validates setup and shows the no-key host's-eye view", () => {
+    const md = dryRunMarkdown({
+      server: "node dist/server.js",
+      mode: "host",
+      suitePath: "intents.yaml",
+      intents: [{ id: "own", query: "what do I own?", expect: "get_holdings" }],
+      tools,
+      unknown: [],
+      fuzz: false,
+      fuzzPerTool: 3,
+    });
+    expect(md).toContain("# routeproof — dry run");
+    expect(md).toContain("no API key needed");
+    expect(md).toContain("✓ suite parsed: `intents.yaml` — 1 intent(s)");
+    expect(md).toContain("✓ server handshake OK: 2 tool(s) advertised");
+    expect(md).toContain("Routing menu — exactly what the model sees (2 tools)");
+    expect(md).toContain("`get_holdings`");
+    expect(md).toContain("how much of each asset"); // the description the model sees
+    expect(md).toContain("## Intents to route (1)");
+    expect(md).toContain("✓ Setup looks good");
+    expect(md).not.toContain("| tier |"); // no tiers declared → no tier column
+  });
+
+  test("adds a tier column and a select-mode note when those are set", () => {
+    const md = dryRunMarkdown({
+      server: "node adapter.mjs reg.json",
+      mode: "select",
+      suitePath: "agents.intents.yaml",
+      intents: [{ id: "x", query: "q", expect: "get_holdings" }],
+      tools,
+      tiers: { remove_account: "destructive" },
+      unknown: [],
+      fuzz: false,
+      fuzzPerTool: 3,
+    });
+    expect(md).toContain("**Mode:** select (forced pick)");
+    expect(md).toContain("| tool | tier | args | description |");
+    expect(md).toContain("destructive"); // remove_account's resolved tier
+    expect(md).toContain("1 tier rule(s) declared");
+  });
+
+  test("warns about an intent that expects a tool the server doesn't advertise", () => {
+    const md = dryRunMarkdown({
+      server: "s",
+      mode: "host",
+      suitePath: "intents.yaml",
+      intents: [{ id: "typo", query: "q", expect: "get_holdngs" }],
+      tools,
+      unknown: [{ id: "typo", expect: "get_holdngs" }],
+      fuzz: false,
+      fuzzPerTool: 3,
+    });
+    expect(md).toContain("⚠️ 1 intent(s) expect a tool this server doesn't advertise");
+    expect(md).toContain("`typo` → `get_holdngs`");
+    expect(md).toContain("Fix the typo above"); // closing line acknowledges it
+    expect(md).not.toContain("✓ Setup looks good");
+  });
+
+  test("fuzz mode shows the generation note and no intents section", () => {
+    const md = dryRunMarkdown({
+      server: "node dist/server.js",
+      mode: "host",
+      intents: [],
+      tools,
+      unknown: [],
+      fuzz: true,
+      fuzzPerTool: 5,
+    });
+    expect(md).toContain("would generate 5 queries/tool");
+    expect(md).not.toContain("## Intents to route");
+    expect(md).toContain("Routing menu");
+  });
+
+  test("escapes pipes in tool descriptions so the menu table holds", () => {
+    const md = dryRunMarkdown({
+      server: "s",
+      mode: "host",
+      suitePath: "i.yaml",
+      intents: [],
+      tools,
+      unknown: [],
+      fuzz: false,
+      fuzzPerTool: 3,
+    });
+    expect(md).toContain("stop tracking \\| delete an account");
   });
 });

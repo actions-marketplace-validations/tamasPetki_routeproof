@@ -96,7 +96,7 @@ npx routeproof intents.yaml --server "node dist/server.js" --baseline routeproof
 There's a GitHub Action wrapper, so the whole thing is one step:
 
 ```yaml
-- uses: tamasPetki/routeproof@v0.3.2
+- uses: tamasPetki/routeproof@v0.3.3
   with:
     intents: routeproof.intents.yaml
     server: "node dist/server.js"
@@ -153,12 +153,22 @@ The adapter is [`examples/registry-adapter.mjs`](examples/registry-adapter.mjs) 
 - ✅ **fuzz** — generate realistic intents from your descriptions and surface the ones that mis-route.
 - ✅ **host / select** — score an MCP host's "whether to act" routing, or an orchestrator's forced "which agent" routing.
 
+## Try it with no API key — `--dry-run`
+
+Before you wire up a key or spend a credit, confirm your setup and see the exact host's-eye view the model will route against:
+
+```bash
+npx routeproof intents.yaml --server "node dist/server.js" --dry-run
+```
+
+No key, no model calls. It parses your suite, handshakes your server, and prints the **routing menu** — every tool's name, schema args, and description, exactly as the model receives them — plus the intents you're asserting. If an intent points at a tool your server doesn't advertise, it says so. It's a satisfying first run that proves the plumbing, and an offline smoke test you can drop in CI.
+
 ## Install / run
 
 Needs an API key for the routing model (BYO): `export ANTHROPIC_API_KEY=...`. Defaults to a cheap model; routing is a small ask.
 
 ```bash
-npx routeproof <intents.json|.yaml> --server "<command>" [--samples N] [--model M] [--json]
+npx routeproof <intents.json|.yaml> --server "<command>" [--samples N] [--model M] [--json] [--dry-run]
 ```
 
 Exit code is `0` only if every intent routed as expected — drop it straight into CI.

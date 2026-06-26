@@ -13,7 +13,7 @@ import { diagnoseMisroute } from "./diagnose.ts";
 import { generateIntentsForTool } from "./fuzz.ts";
 import { mapWithConcurrency } from "./concurrency.ts";
 import { annotateEscalations } from "./tiers.ts";
-import { summarize, toMarkdown } from "./report.ts";
+import { summarize, toMarkdown, dryRunMarkdown } from "./report.ts";
 import {
   toBaseline,
   parseBaseline,
@@ -31,6 +31,7 @@ interface Args {
   model?: string;
   mode?: RouteMode;
   json: boolean;
+  dryRun: boolean;
   diagnose: boolean;
   minConfidence: number;
   concurrency: number;
@@ -48,6 +49,7 @@ function parseArgs(argv: string[]): Args {
     suite: "",
     samples: 3,
     json: false,
+    dryRun: false,
     diagnose: true,
     minConfidence: 0.8,
     concurrency: 4,
@@ -83,6 +85,7 @@ function parseArgs(argv: string[]): Args {
     else if (v === "--fuzz") a.fuzz = true;
     else if (v === "--fuzz-per-tool") a.fuzzPerTool = Number(argv[++i] ?? 3);
     else if (v === "--json") a.json = true;
+    else if (v === "--dry-run" || v === "--validate") a.dryRun = true;
     else if (v === "--no-diagnose") a.diagnose = false;
     else if (v === "-h" || v === "--help") {
       printUsage();
@@ -159,6 +162,7 @@ function printUsage(): void {
       "  --select                shorthand for --mode select\n" +
       "  --min-confidence 0..1   below this, a passing route is flagged flaky (default 0.8)\n" +
       "  --json                  emit the full report as JSON instead of markdown\n" +
+      "  --dry-run               validate setup + show the model's-eye view; no API key, no calls\n" +
       "  --no-diagnose           skip the per-misroute why + suggested-fix pass\n" +
       "  --version               print the routeproof version and exit\n" +
       "  regression mode: --save-baseline <file> to pin; --baseline <file> to fail CI on drift\n" +
@@ -213,6 +217,52 @@ async function main(): Promise<void> {
           `A forced classifier can't decline — use host mode for none-assertions, or give these a real expected tool.`,
       );
     }
+  }
+
+  // Dry run: validate the setup and print the host's-eye view WITHOUT a model
+  // call or an API key — the no-key first win, and an offline CI smoke test. It
+  // runs after the suite/server checks above (a parse error or an unstartable
+  // server has already thrown → exit 2) but before any provider is created, so
+  // a cloner with no key still gets a satisfying, correct result.
+  if (args.dryRun) {
+    const unknown = args.fuzz ? [] : unknownExpectations(suiteIntents, tools.map((t) => t.name));
+    if (args.json) {
+      console.log(
+        JSON.stringify(
+          {
+            dryRun: true,
+            server,
+            mode,
+            suite: args.fuzz ? undefined : args.suite,
+            fuzz: args.fuzz,
+            intents: suiteIntents.map((i) => ({ id: i.id, query: i.query, expect: i.expect })),
+            tools,
+            tiers: suiteTiers,
+            unknownExpectations: unknown,
+          },
+          null,
+          2,
+        ),
+      );
+    } else {
+      console.log(
+        dryRunMarkdown({
+          server,
+          mode,
+          suitePath: args.suite,
+          intents: suiteIntents,
+          tools,
+          tiers: suiteTiers,
+          unknown,
+          fuzz: args.fuzz,
+          fuzzPerTool: args.fuzzPerTool,
+        }),
+      );
+    }
+    // Exit 0 when the setup is runnable (suite parsed, server up, tools listed).
+    // An unknown expectation is shown as a warning, matching the real run's
+    // severity — it doesn't break the run, so it doesn't fail the dry run.
+    process.exit(0);
   }
 
   const provider = new AnthropicProvider(args.model);
