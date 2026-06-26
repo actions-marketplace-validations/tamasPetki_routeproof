@@ -14,6 +14,9 @@
 # server but wrong for a selector.) routeproof stops at the selection step — it
 # never runs the chosen agent — so this is safe against your real, live registry.
 
+# This path is relative to the package root (where the examples/ dir lives). If
+# you copy this suite into your own project, change it to point at your adapter +
+# registry, or override it on the command line with --server "...".
 server: "node examples/registry-adapter.mjs examples/agents.registry.json"
 mode: select
 

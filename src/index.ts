@@ -21,6 +21,7 @@ import {
   regressionMarkdown,
 } from "./baseline.ts";
 import { readFileSync, writeFileSync } from "node:fs";
+import { VERSION } from "./version.ts";
 import type { EvalReport, Intent, IntentResult, Tier, RouteMode } from "./types.ts";
 
 interface Args {
@@ -85,6 +86,11 @@ function parseArgs(argv: string[]): Args {
     else if (v === "--no-diagnose") a.diagnose = false;
     else if (v === "-h" || v === "--help") {
       printUsage();
+      process.exit(0);
+    } else if (v === "--version" || v === "-v") {
+      // Plain version to stdout (not the usage banner on stderr) so CI can
+      // capture it — people pin `routeproof@x.y.z` and want to confirm the run.
+      console.log(VERSION);
       process.exit(0);
     } else if (v.startsWith("-")) {
       // Never silently swallow an unrecognized flag. A user copy-pasting a flag
@@ -154,6 +160,7 @@ function printUsage(): void {
       "  --min-confidence 0..1   below this, a passing route is flagged flaky (default 0.8)\n" +
       "  --json                  emit the full report as JSON instead of markdown\n" +
       "  --no-diagnose           skip the per-misroute why + suggested-fix pass\n" +
+      "  --version               print the routeproof version and exit\n" +
       "  regression mode: --save-baseline <file> to pin; --baseline <file> to fail CI on drift\n" +
       "                   [--drift-tolerance 0..1] [--fail-on-coverage-drop] [--fail-on-escalation]\n" +
       "  fuzz mode:       --fuzz [--fuzz-per-tool N] — invent queries from your descriptions",
