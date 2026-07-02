@@ -56,6 +56,24 @@ Both `get_holdings` and `get_pnl` controls stayed at 100% — the fix didn't can
 
 **Where it does NOT fix things — and that's the honest part.** Fuzz also flagged the write/management tools (`add_wallet_address`, `remove_account`, …) at 0/10. Adding trigger words did *nothing*: those tools require an `account_id` the conversational query never contains, so the host correctly defers (lists first, or asks) rather than calling a tool it can't fill. routeproof is strongest for **directly-callable** tools; for elicitation-heavy ones, "route to none/list-first" can be correct multi-turn behaviour, not a misroute. Measuring is what tells the two apart — eyeballing the descriptions never would.
 
+## A second worked example — on a server you'll recognize
+
+The example above is my own server, so here's one that isn't. I pointed routeproof at the canonical [`@modelcontextprotocol/server-filesystem`](https://github.com/modelcontextprotocol/servers/tree/main/src/filesystem) reference server (14 tools) — reproduce it with the bundled suite:
+
+```bash
+npx routeproof examples/filesystem-reference.intents.yaml \
+  --server "npx -y @modelcontextprotocol/server-filesystem /tmp/any-dir"
+```
+
+It scored **4/6 on a fast model (Haiku)**, and the two failures told one clean story — **`list_allowed_directories` was over-grabbing:**
+
+```
+❌ "read the contents of config.json"      → list_allowed_directories  (2/3)   expected read_text_file
+❌ "recursive tree of the whole project"   → list_allowed_directories  (2/3)   expected directory_tree
+```
+
+One tool — a harmless permissions-lister — was quietly stealing *two unrelated intents* (reading a file, viewing a tree), because its description never fenced off what it *doesn't* do. The diagnosis pass named the fix: add a line to `list_allowed_directories` clarifying it lists only the allowed directories, **not their contents or structure — use `directory_tree` for that.** This isn't a knock on a well-built server; it's the whole point. The ambiguity is invisible until you route real queries through the descriptions, and a fast host hits it two times out of three. (The other two "failures" were flaky-but-correct — the right tool at 67% confidence — and the diagnosis said so: *no fix needed*. routeproof separates a real misroute from mere nondeterminism instead of lumping them.)
+
 ## Permission tiers — grade a misroute by severity, not just count it
 
 The routing score tells you a query went to the wrong tool. It doesn't tell you how *bad* that is. A read query that mis-routes to another read tool is a wrong answer; a read query that grabs `remove_account` is a query reaching for authority it was never granted — and a 98% score hiding one of those is more dangerous than 90% of harmless mix-ups. The score alone is a safety blind spot.
