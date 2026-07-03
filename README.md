@@ -65,14 +65,14 @@ npx routeproof examples/filesystem-reference.intents.yaml \
   --server "npx -y @modelcontextprotocol/server-filesystem /tmp/any-dir"
 ```
 
-It scored **4/6 on a fast model (Haiku)**, and the two failures told one clean story — **`list_allowed_directories` was over-grabbing:**
+It scored **3–4 / 6 on a fast model (Haiku)** — the score wobbles between runs, which is the point (routing isn't deterministic, so routeproof samples). But one thing was rock-solid across runs — **`list_allowed_directories` over-grabbing:**
 
 ```
-❌ "read the contents of config.json"      → list_allowed_directories  (2/3)   expected read_text_file
-❌ "recursive tree of the whole project"   → list_allowed_directories  (2/3)   expected directory_tree
+❌ "read the contents of config.json"      → list_allowed_directories   (both runs)   expected read_text_file
+❌ "recursive tree of the whole project"   → list_allowed_directories   (both runs)   expected directory_tree
 ```
 
-One tool — a harmless permissions-lister — was quietly stealing *two unrelated intents* (reading a file, viewing a tree), because its description never fenced off what it *doesn't* do. The diagnosis pass named the fix: add a line to `list_allowed_directories` clarifying it lists only the allowed directories, **not their contents or structure — use `directory_tree` for that.** This isn't a knock on a well-built server; it's the whole point. The ambiguity is invisible until you route real queries through the descriptions, and a fast host hits it two times out of three. (The other two "failures" were flaky-but-correct — the right tool at 67% confidence — and the diagnosis said so: *no fix needed*. routeproof separates a real misroute from mere nondeterminism instead of lumping them.)
+One tool — a harmless permissions-lister — was quietly stealing *two unrelated intents* (reading a file, viewing a tree), because its description never fenced off what it *doesn't* do. The diagnosis pass named the fix: add a line to `list_allowed_directories` clarifying it lists only the allowed directories, **not their contents or structure — use `directory_tree` for that.** This isn't a knock on a well-built server; it's the whole point: the ambiguity is invisible until you route real queries through the descriptions. And routeproof stays honest about the grey area — `rename-file` routed to `move_file` one run and *deferred* (asked for the file's path, routing to `none`) the next, which is the host being appropriately careful, not a broken description. Measuring surfaces the question; it doesn't pretend to answer all of them.
 
 ## Permission tiers — grade a misroute by severity, not just count it
 
